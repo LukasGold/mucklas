@@ -14,9 +14,32 @@
 
 # mucklas
 
-> A collection of useful (Python) functions and concepts. Something you can discover if you look closely - just like the fictional creatures of the same name in Sven Nordqvist's Swedish books 'Pettson och Findus'.
+> A collection of useful (Python) functions and concepts. Something you can discover if you look closely - just
+> like the fictional creatures of the same name in Sven Nordqvist's Swedish books 'Pettson och Findus'.
 
-A longer description of your project goes here...
+This is a collection that is organized in a way that makes it easy to discover and use the functions and concepts.
+The collection can be installed as a dependency into projects.
+
+## Installation
+
+```bash
+pip install mucklas
+```
+
+## Content
+
+The collection is organized in modules. Each module contains a set of functions and concepts that are related to
+each other and have a common theme. The modules are:
+
+- [`mucklas.dataclasses`](docs/dataclasses.md): A collection of functions to work with dataclasses, e.g., for defining typed param
+  objects
+  to pass to functions.
+
+
+
+
+
+
 
 
 <!-- pyscaffold-notes -->
