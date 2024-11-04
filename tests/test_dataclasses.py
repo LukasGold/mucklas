@@ -49,5 +49,13 @@ def test_replace_param():
     def func(param: Param) -> str:
         return f"{param.a} {param.b} {param.c}"
 
+    # Test with positional arguments only
+    assert func(1, 2.0) == "1 2.0 abc"
+    # Test with one kwarg
+    assert func(1, 2.0, c="xyz") == "1 2.0 xyz"
+    # Test with multiple kwargs
     assert func(a=1, b=2.0, c="xyz") == "1 2.0 xyz"
-    assert func(a=1, b=2.0) == "1 2.0 abc"
+    # Test with Param instance as positional argument
+    assert func(Param(a=1, b=2.0, c="xyz")) == "1 2.0 xyz"
+    # Test with Param instance as kwarg
+    assert func(param=Param(a=1, b=2.0, c="xyz")) == "1 2.0 xyz"

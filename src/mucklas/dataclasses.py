@@ -121,11 +121,31 @@ def replace_param(func: Callable) -> Callable:
     # Create a new signature with the new parameters
     new_sig = original_sig.replace(parameters=new_params)
 
-    def wrapper(**kwargs):
-        # Create an instance of the model with the provided keyword arguments
-        params_instance = model(**kwargs)
-        # Call the original function with the model instance as the only argument
-        return func(params_instance)
+    def wrapper(*args, **kwargs):
+        if len(args) == 1 and isinstance(args[0], model):
+            # Call the original function with the model instance as the only argument
+            return func(args[0])
+        elif len(args) == 0 and isinstance(kwargs.get(param_name), model):
+            # Call the original function with the model instance as the only argument
+            return func(kwargs.get(param_name))
+        else:
+            if len(args) == 0:
+                # Create an instance of the model with the provided keyword arguments
+                params_instance = model(**kwargs)
+            else:
+                # Pydantic does not allow positional arguments, so we need to map the
+                # positional arguments to the field names of the model
+                if v1:
+                    # model: Type[pv1.BaseModel]
+                    pot_args = model.__fields__.keys()
+                else:
+                    # model: Type[BaseModel]
+                    pot_args = model.model_fields.keys()
+                new_args = dict(zip(pot_args, args))
+
+                params_instance = model(**{**new_args, **kwargs})
+            # Call the original function with the model instance as the only argument
+            return func(params_instance)
 
     # Update the signature of the wrapper function
     wrapper.__signature__ = new_sig
