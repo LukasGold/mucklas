@@ -1,10 +1,29 @@
 import inspect
+from functools import partialmethod
 from typing import Any, Callable, Dict, Type, TypeVar, Union, get_args
 
 import pydantic.v1 as pv1
 from pydantic import BaseModel, ConfigDict, create_model
 
 T = TypeVar("T")
+
+
+def partialclass(cls, *args, **kwargs):
+    """Partial class to be used on a class to partially initialize it.
+    E.g., to set default values for some attributes. Returns a partially initialized
+    class, which can be used to create instances of the class, but without having to
+    set the default values for the attributes.
+
+    Source
+    ------
+    https://stackoverflow.com/questions/38911146/
+    python-equivalent-of-functools-partial-for-a-class-constructor
+    """
+
+    class NewCls(cls):
+        __init__ = partialmethod(cls.__init__, *args, **kwargs)
+
+    return NewCls
 
 
 def pydantic_model(cls: Type[T]) -> Type[BaseModel]:
