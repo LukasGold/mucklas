@@ -1,9 +1,10 @@
 import inspect
-from functools import partialmethod
+from functools import partialmethod, wraps
 from typing import Any, Callable, Dict, Type, TypeVar, Union, get_args
 
 import pydantic.v1 as pv1
 from pydantic import BaseModel, ConfigDict, create_model
+from typing_extensions import deprecated
 
 T = TypeVar("T")
 
@@ -57,7 +58,9 @@ def model_from_signature(
     }
     # create mode, set validation to strict
     if strict is not False:
-        model_fields["model_config"] = ConfigDict(strict=strict)
+        model_fields["model_config"] = ConfigDict(
+            strict=strict, arbitrary_types_allowed=True
+        )
     # Create a model name if not provided
     if model_name is None:
         model_name = (
@@ -70,6 +73,7 @@ def model_from_signature(
             f"Pydantic model created from the type hints in "
             f"the signature of function{func.__name__}'"
         )
+    model_fields["__doc__"] = model_description
     # Create a Pydantic model dynamically
     return create_model(model_name, **model_fields)
 
@@ -137,10 +141,11 @@ def replace_param(func: Callable) -> Callable:
             for name, field in model.model_fields.items()
         ]
 
-    # Create a new signature with the new parameters
-    new_sig = original_sig.replace(parameters=new_params)
-
+    @wraps(func)
     def wrapper(*args, **kwargs):
+        """Unfortunately, it is not possible to programmatically overload the decorated
+        function with a signature that contains kwargs and at the same time keep the
+        signature with the model instance as the only argument."""
         if len(args) == 1 and isinstance(args[0], model):
             # Call the original function with the model instance as the only argument
             return func(args[0])
@@ -166,14 +171,14 @@ def replace_param(func: Callable) -> Callable:
             # Call the original function with the model instance as the only argument
             return func(params_instance)
 
-    # Update the signature of the wrapper function
-    wrapper.__signature__ = new_sig
+    # Update the signature of the wrapper function with the new parameters
+    wrapper.__signature__ = original_sig.replace(parameters=new_params)
     return wrapper
 
 
+@deprecated("Use pydantic.validate_call instead.")
 def validate_args(func: Callable) -> Callable:
     """Use a pydantic model to validate if the args and kwargs are correctly typed."""
-    # todo: see if this does the same as pydantic.validate_call
     # Create a Pydantic model from the function signature
     model = model_from_signature(func, strict=True)
 
