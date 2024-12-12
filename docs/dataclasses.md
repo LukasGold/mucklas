@@ -43,3 +43,40 @@ def print_me(x: str, y: int):
 
 print_me("a", "1.0")  # raises a TypeError
 ```
+
+
+# Partial definition of a data model
+
+```python
+from osw.express import OswExpress
+from mucklas.dataclasses import partialclass
+
+# OswExpress.StoreEntityParam
+'''
+entities: Union[OswBaseModel, List[OswBaseModel]]  # actually model.Entity
+"""The entities to store. Can be a single entity or a list of entities."""
+namespace: Optional[str]
+"""The namespace of the entities. If not set, the namespace is derived from the
+entity."""
+parallel: Optional[bool] = None
+"""If set to True, the entities are stored in parallel."""
+overwrite: Optional[OVERWRITE_CLASS_OPTIONS] = "keep existing"
+"""If no class specific overwrite setting is set, this setting is used."""
+overwrite_per_class: Optional[List[OSW.OverwriteClassParam]] = None
+"""A list of OverwriteClassParam objects. If a class specific overwrite setting
+is set, this setting is used.
+"""
+meta_category_title: Optional[str] = "Category:Category"
+debug: Optional[bool] = False
+_overwrite_per_class: Dict[str, Dict[str, OSW.OverwriteClassParam]] = (
+    PrivateAttr()
+)
+'''
+
+# Replacing the default value for "parallel"
+ParallelDisabled = partialclass(OswExpress.StoreEntityParam, parallel=False, )
+
+osw_obj = OswExpress("wiki-dev.open-semantic-lab.org")
+
+osw_obj.store_entity(ParallelDisabled(entities=[]))
+```
