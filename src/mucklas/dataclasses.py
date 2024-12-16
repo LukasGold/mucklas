@@ -11,6 +11,12 @@ from typing_extensions import deprecated
 T = TypeVar("T")
 
 
+class FuncType(StrEnum):
+    function = "function"
+    method = "method"
+    class_method = "class_method"
+
+
 def partialclass(cls, *args, **kwargs):  # noqa: typo
     """Partial class to be used on a class to partially initialize it.
     E.g., to set default values for some attributes. Returns a partially initialized
@@ -58,7 +64,9 @@ class WhatModelTypeResult:
     model: Union[Type[BaseModel], Type[pv1.BaseModel]] = None
 
 
-def what_model_type(type_: Type[T], return_model: bool = False) -> WhatModelTypeResult:
+def what_model_type(
+    type_: Union[type, Type[T]], return_model: bool = False
+) -> WhatModelTypeResult:
     """Determines if a type is a (subclass of a) Pydantic model and if so,
     which version of Pydantic model is used.
 
@@ -102,6 +110,36 @@ def what_model_type(type_: Type[T], return_model: bool = False) -> WhatModelType
     return WhatModelTypeResult(pydantic_model_version=result)
 
 
+def function_or_method(func: Callable) -> FuncType:
+    """Determines if a function is a standalone function, a method of a class, or a
+    class method.
+
+    Parameters
+    ----------
+    func
+        The function to be tested
+
+    Returns
+    -------
+    result
+        The type of the function
+    """
+    original_sig: inspect.Signature = inspect.signature(func)
+    func_type = FuncType.function
+    if len(original_sig.parameters) > 0:
+        # print("The function has more than zero parameters")
+        first_param = list(original_sig.parameters.values())[0]
+        # print("Name of first parameter:", first_param.name)
+        # print("ismethod:", inspect.ismethod(func))
+        if first_param.name == "self":
+            # print("The function is a method of class")
+            func_type = FuncType.method
+        elif first_param.name == "cls":
+            # print("The function is a class method")
+            func_type = FuncType.class_method
+    return func_type
+
+
 def pydantic_model_version_used(func: Callable) -> PydanticModelVersion:
     """Determines which version of Pydantic models is used in the type hints of a
     function signature. If the function signature contains a mix of Pydantic model
@@ -143,7 +181,9 @@ def model_from_signature(
     caller_globals: dict = None,
     model_name: str = None,
     model_description: str = None,
+    model_version: PydanticModelVersion = None,
     strict: bool = False,
+    arbitrary_types_allowed: bool = True,
 ) -> Type[BaseModel]:
     """Function to create a Pydantic model from a function signature, using type
     hints to annotate the model fields.
@@ -162,8 +202,13 @@ def model_from_signature(
     model_description
         The description of the Pydantic model. If not provided, a default description
         will be generated.
+    model_version
+        The version of Pydantic model to be created. If not provided, the version will
+        be determined based on the type hints in the function signature.
     strict
         Whether to set the model to strict validation. Default is False.
+    arbitrary_types_allowed
+        Whether to allow arbitrary types in the model. Default is True.
 
     Returns
     -------
@@ -172,8 +217,14 @@ def model_from_signature(
     """
     # Extract the function signature
     signature = inspect.signature(func)
+    if len(signature.parameters) == 0:
+        raise ValueError(
+            "The passed function must have at least one parameter to"
+            " create a Pydantic model."
+        )
     # Test if the functions arguments mix BaseModel and pv1.BaseModel
-    model_version = pydantic_model_version_used(func)
+    if model_version is None:
+        model_version = pydantic_model_version_used(func)
     if model_version == PydanticModelVersion.COMBINED:
         raise ValueError(
             "The function signature must have type hints that are all of the same "
@@ -186,6 +237,7 @@ def model_from_signature(
             param.default if param.default is not inspect.Parameter.empty else ...,
         )
         for name, param in signature.parameters.items()
+        if name != "self" and name != "cls"
     }
     # Create a model name if not provided
     if model_name is None:
@@ -197,7 +249,7 @@ def model_from_signature(
     if model_description is None:
         model_description = (
             f"Pydantic model created from the type hints in "
-            f"the signature of function{func.__name__}'"
+            f"the signature of function {func.__name__}'"
         )
     # Set the model description
     model_fields["__doc__"] = model_description
@@ -206,7 +258,7 @@ def model_from_signature(
         # Set validation to strict
         if strict is not False:
             model_fields["Config"] = pv1.ConfigDict(
-                strict=strict, arbitrary_types_allowed=True
+                strict=strict, arbitrary_types_allowed=arbitrary_types_allowed
             )
         new_model: Type[pv1.BaseModel] = pv1.create_model(model_name, **model_fields)
     else:
@@ -214,8 +266,9 @@ def model_from_signature(
         # Set validation to strict
         if strict is not False:
             model_fields["model_config"] = ConfigDict(
-                strict=strict, arbitrary_types_allowed=True
+                strict=strict, arbitrary_types_allowed=arbitrary_types_allowed
             )
+        print(model_fields)
         new_model: Type[BaseModel] = create_model(model_name, **model_fields)
     if caller_globals is not None:
         if model_name in caller_globals:
@@ -226,6 +279,49 @@ def model_from_signature(
         # Add the model to the globals of the calling module
         caller_globals[model_name] = new_model
     return new_model
+
+
+def compare_param_model_version(func: Callable, model_version: PydanticModelVersion):
+    """Compares the Pydantic model version used in the function signature of a method
+    and the passed Pydantic model version.
+
+    Parameters
+    ----------
+    func
+        The method to be tested
+    model_version
+        The Pydantic model version to be compared with
+
+    Raises
+    ------
+    ValueError
+        If the Pydantic model version used in the function signature of the method is
+        different from the Pydantic model version used in the class that posses the
+        method.
+    """
+    original_sig: inspect.Signature = inspect.signature(func)
+    func_type = function_or_method(func)
+    class_model_version = PydanticModelVersion.NONE
+    if func_type == FuncType.method:
+        # Not implemented yet. Approaches tried so far:
+        # - Access signature and get the class from the annotation of the first
+        #   parameter
+        # - Derive the class name from the qualified name of the method
+        # - Access the __self__ attribute of the method
+        pass
+    elif func_type == FuncType.class_method:
+        pass
+    # Compare the Pydantic model version used in the function signature of the method
+    if (
+        class_model_version != PydanticModelVersion.NONE
+        and class_model_version != model_version
+    ):
+        raise ValueError(
+            f"The Pydantic model version used in the function signature of "
+            f"'{func.__name__}' is different from the Pydantic model version "
+            f"used in the class "
+            f"'{original_sig.parameters['self'].annotation.__class__.__name__}'."
+        )
 
 
 def replace_param(func: Callable) -> Callable:
@@ -245,29 +341,43 @@ def replace_param(func: Callable) -> Callable:
     """
     # Get the original signature
     original_sig: inspect.Signature = inspect.signature(func)
-
-    # See if the function has a single parameter
-    if len(original_sig.parameters) != 1:
+    # Test if the function is a method of a class
+    func_type = function_or_method(func)
+    # See if the function has a single parameter (except for self or cls)
+    if func_type == FuncType.function and len(original_sig.parameters) != 1:
         raise ValueError(
             f"The function '{func.__name__}' must have exactly one parameter of type "
             f"Pydantic model for the decorator to work properly."
         )
+    elif func_type != FuncType.function and len(original_sig.parameters) != 2:
+        raise ValueError(
+            f"The function '{func.__name__}' must have exactly one parameter of type "
+            f"Pydantic model other than 'self' or 'cls' for the decorator to work "
+            f"properly."
+        )
     # Get the name of the parameter
-    param_name: str = list(original_sig.parameters.keys())[0]
+    if func_type == FuncType.function:
+        param_name: str = list(original_sig.parameters.keys())[0]
+    else:
+        param_name: str = list(original_sig.parameters.keys())[1]
     # Extract the params argument type
     param_type = original_sig.parameters[param_name].annotation
     # Ensure params_type is a subclass of BaseModel
     test_res = what_model_type(type_=param_type, return_model=True)
-    if test_res.pydantic_model_version == PydanticModelVersion.NONE:
+    model_version = test_res.pydantic_model_version
+    if model_version == PydanticModelVersion.NONE:
         raise TypeError(
             f"The type hint of the single parameter of the function '{func.__name__}' "
             "must be a subclass of Pydantic BaseModel. If the type hint is a Union, "
             "one argument of Union must be a subclass of Pydantic BaseModel."
         )
     model: Union[Type[BaseModel], Type[pv1.BaseModel]] = test_res.model
-    # test_res.model
+    # If the passed function is a method of a class, test if the class is using a
+    #  different Pydantic model version than the function, and eventually raise an error
+    # compare_param_model_version(func, model_version)  # Not implemented yet
+
     # Create new parameters based on the fields of the params_type
-    if test_res.pydantic_model_version == PydanticModelVersion.V1:
+    if model_version == PydanticModelVersion.V1:
         model_: Type[pv1.BaseModel] = model
         new_params = [
             inspect.Parameter(
@@ -289,36 +399,78 @@ def replace_param(func: Callable) -> Callable:
         """Unfortunately, it is not possible to programmatically overload the decorated
         function with a signature that contains kwargs and at the same time keep the
         signature with the model instance as the only argument."""
-        if len(args) == 1 and isinstance(args[0], model):
-            # There is only one positional argument and it is an instance of the model
-            return func(args[0])
-        elif len(args) == 0 and isinstance(kwargs.get(param_name), model):
-            # There are no positional arguments and the only keyword argument is an
-            #  instance of the model
-            return func(kwargs.get(param_name))
-        else:
-            if len(args) == 0:
-                # There are no positional arguments
-                # Create an instance of the model with the provided keyword arguments
-                params_instance = model(**kwargs)
+        if func_type == FuncType.function:
+            if len(args) == 1 and isinstance(args[0], model):
+                # There is only one positional argument and it is an instance of the
+                #  model
+                return func(args[0])
+            elif len(args) == 0 and isinstance(kwargs.get(param_name), model):
+                # There are no positional arguments and the only keyword argument is an
+                #  instance of the model
+                return func(kwargs.get(param_name))
             else:
-                # There are positional and keyword arguments
-                # Pydantic does not allow positional arguments, so we need to map the
-                #  positional arguments to the field names of the model
-                # Get the name of potential arguments
-                if test_res.pydantic_model_version == PydanticModelVersion.V1:
-                    model__: Type[pv1.BaseModel] = model
-                    pot_args = model__.__fields__.keys()
+                if len(args) == 0:
+                    # There are no positional arguments
+                    # Create an instance of the model with the provided keyword
+                    #  arguments
+                    params_instance = model(**kwargs)
                 else:
-                    model__: Type[BaseModel] = model
-                    pot_args = model__.model_fields.keys()
-                # Create a dictionary with the positional arguments mapped to the fields
-                new_args = dict(zip(pot_args, args))
-                # Merge the positional arguments with the keyword arguments
-                #  and create an instance of the model
-                params_instance = model(**{**new_args, **kwargs})
-            # Call the original function with the model instance as the only argument
-            return func(params_instance)
+                    # There are positional and keyword arguments
+                    # Pydantic does not allow positional arguments, so we need to map
+                    #  the positional arguments to the field names of the model
+                    # Get the name of potential arguments
+                    if model_version == PydanticModelVersion.V1:
+                        model__: Type[pv1.BaseModel] = model
+                        pot_args = model__.__fields__.keys()
+                    else:
+                        model__: Type[BaseModel] = model
+                        pot_args = model__.model_fields.keys()
+                    # Create a dictionary with the positional arguments mapped to the
+                    #  fields
+                    new_args = dict(zip(pot_args, args))
+                    # Merge the positional arguments with the keyword arguments
+                    #  and create an instance of the model
+                    params_instance = model(**{**new_args, **kwargs})
+                # Call the original function with the model instance as the only
+                #  argument
+                return func(params_instance)
+        else:
+            # The function is a method of a class
+            self_or_cls = args[0]
+            if len(args) == 2 and isinstance(args[1], model):
+                # There is only one positional argument and it is an instance of the
+                #  model
+                return func(self_or_cls, args[1])
+            elif len(args) == 1 and isinstance(kwargs.get(param_name), model):
+                # There are no positional arguments and the only keyword argument is an
+                #  instance of the model
+                return func(self_or_cls, kwargs.get(param_name))
+            else:
+                if len(args) == 1:
+                    # There are no positional arguments
+                    # Create an instance of the model with the provided keyword
+                    #  arguments
+                    params_instance = model(**kwargs)
+                else:
+                    # There are positional and keyword arguments
+                    # Pydantic does not allow positional arguments, so we need to map
+                    #  the positional arguments to the field names of the model
+                    # Get the name of potential arguments
+                    if model_version == PydanticModelVersion.V1:
+                        model__: Type[pv1.BaseModel] = model
+                        pot_args = model__.__fields__.keys()
+                    else:
+                        model__: Type[BaseModel] = model
+                        pot_args = model__.model_fields.keys()
+                    # Create a dictionary with the positional arguments mapped to the
+                    #  fields
+                    new_args = dict(zip(pot_args, args[1:]))
+                    # Merge the positional arguments with the keyword arguments
+                    #  and create an instance of the model
+                    params_instance = model(**{**new_args, **kwargs})
+                # Call the original function with the model instance as the only
+                #  argument
+                return func(self_or_cls, params_instance)
 
     # Update the signature of the wrapper function with the new parameters
     wrapper.__signature__ = original_sig.replace(parameters=new_params)
@@ -368,7 +520,6 @@ def replace_args(caller_globals: dict, model_name: str = None) -> Callable:
     wrapper
         The decorated function
     """
-    # todo: what if this decorator is used on a method?
 
     def decorator(func: Callable):
         """Inner decorator to decorate the function
@@ -378,15 +529,23 @@ def replace_args(caller_globals: dict, model_name: str = None) -> Callable:
         func
             The function to be decorated.
         """
-        # Create a Pydantic model from the function signature
-        model = model_from_signature(func, caller_globals, model_name)
-        model_version = what_model_type(model).pydantic_model_version
-        if model_version == PydanticModelVersion.V1:
-            method_name = "dict"
-        else:
-            method_name = "model_dump"
-        # Create a new signature with the model as the only parameter
         original_sig = inspect.signature(func)
+        if len(original_sig.parameters) == 0:
+            raise ValueError(
+                "The passed function must have at least one parameter for "
+                "this decorator to be applicable."
+            )
+        # Determine the Pydantic model version used in the function signature
+        model_version = pydantic_model_version_used(func)
+        # Create a Pydantic model from the function signature
+        model = model_from_signature(
+            func, caller_globals, model_name, model_version=model_version
+        )
+        if model_version == PydanticModelVersion.V1:
+            dict_or_dump = "dict"
+        else:
+            dict_or_dump = "model_dump"
+        # Create a new signature with the model as the only parameter
         new_sig = original_sig.replace(
             parameters=[
                 inspect.Parameter(
@@ -397,50 +556,45 @@ def replace_args(caller_globals: dict, model_name: str = None) -> Callable:
                 )
             ]
         )
+        # Test if the function is a method of a class
+        func_type = function_or_method(func)
+        # Test if the class is using a different Pydantic model version than the
+        #  function, eventually raise an error
+        # compare_param_model_version(func, model_version)  # Not implemented yet
 
         @wraps(func)
         def wrapper(*args, **kwargs):
-            if len(args) == 1 and isinstance(args[0], model):
-                method = getattr(args[0], method_name)
-                return func(**method())
-            elif (
-                len(args) == 0
-                and len(kwargs) == 0
-                and isinstance(kwargs.get("params"), model)
-            ):
-                method = getattr(kwargs["params"], method_name)
-                return func(**method())
+            if len(args) > 0 and func_type != FuncType.function:
+                # print("The function is a method of class")
+                self_or_cls = args[0]
+                if len(args) == 2 and isinstance(args[1], model):
+                    model_dump = getattr(args[1], dict_or_dump)
+                    return func(self_or_cls, **model_dump())
+                elif (
+                    len(args) == 1
+                    and len(kwargs) == 1
+                    and isinstance(kwargs.get("params"), model)
+                ):
+                    model_dump = getattr(kwargs["params"], dict_or_dump)
+                    return func(self_or_cls, **model_dump())
+                else:
+                    return func(*args, **kwargs)
             else:
-                return func(*args, **kwargs)
+                # print("The function is a standalone function")
+                if len(args) == 1 and isinstance(args[0], model):
+                    model_dump = getattr(args[0], dict_or_dump)
+                    return func(**model_dump())
+                elif (
+                    len(args) == 0
+                    and len(kwargs) == 1
+                    and isinstance(kwargs.get("params"), model)
+                ):
+                    model_dump = getattr(kwargs["params"], dict_or_dump)
+                    return func(**model_dump())
+                else:
+                    return func(*args, **kwargs)
 
         wrapper.__signature__ = new_sig
         return wrapper
 
     return decorator
-
-
-if __name__ == "__main__":
-
-    class Person(BaseModel):
-        name: str
-        age: int
-
-    class Item(pv1.BaseModel):
-        name: str
-        price: float
-
-    # @replace_param
-    # def my_func(person: Person):
-    #     print(person)
-    #
-    # instance = Person(name="Alice", age=30)
-    # signature = inspect.signature(my_func)
-    # print(signature)
-    #
-    # @replace_args
-    # def my_com_func(x: str, y: int, z: Person, a: float = 1.0):
-    #     print(x, y, z, a)
-    #
-    # # Model = model_from_signature(my_com_func)
-    #
-    # # mm = Model()

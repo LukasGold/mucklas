@@ -60,13 +60,13 @@ def test_pydantic_v1_model():
         name: str
         price: float
 
-    Item1Model = pydantic_v1_model(Item1)
-    assert issubclass(Item1Model, pv1.BaseModel)
+    item1model = pydantic_v1_model(Item1)
+    assert issubclass(item1model, pv1.BaseModel)
 
 
 def test_model_from_signature():
-    def func(a: int, b: float, c: str = "abc") -> None:
-        pass
+    def func(a: int, b: float, c: str = "abc") -> str:
+        return f"{a} {b} {c}"
 
     expected_model_name = func.__name__.capitalize() + "Param"
     model = model_from_signature(func)
@@ -93,8 +93,8 @@ def test_model_from_signature():
     class Param4(pv1.BaseModel):
         b: int
 
-    def func1(param3: Param3, param4: Param4) -> None:
-        pass
+    def func1(param3: Param3, param4: Param4) -> str:
+        return f"{param3.a} {param4.b}"
 
     with pytest.raises(ValueError):
         model_from_signature(func1)
@@ -139,6 +139,29 @@ def test_replace_param():
         def func2(param: Param, param1: Param1) -> str:
             return f"{param.a} {param.b} {param.c} {param1.a} {param1.b} {param1.c}"
 
+    class Param2(BaseModel):
+        a: int
+        b: float
+        c: str = "abc"
+
+    class MyClass(BaseModel):
+        @replace_param
+        def my_method(self, param: Param2) -> str:
+            return f"{param.a} {param.b} {param.c}"
+
+    instance = MyClass()
+
+    # Test with positional arguments only
+    assert instance.my_method(1, 2.0) == "1 2.0 abc"
+    # Test with one kwarg
+    assert instance.my_method(1, 2.0, c="xyz") == "1 2.0 xyz"
+    # Test with multiple kwargs
+    assert instance.my_method(a=1, b=2.0, c="xyz") == "1 2.0 xyz"
+    # Test with Param instance as positional argument
+    assert instance.my_method(Param2(a=1, b=2.0, c="xyz")) == "1 2.0 xyz"
+    # Test with Param instance as kwarg
+    assert instance.my_method(param=Param2(a=1, b=2.0, c="xyz")) == "1 2.0 xyz"
+
 
 def test_pydantic_model_version_used():
     class Person(BaseModel):
@@ -179,3 +202,67 @@ def test_replace_args():
     # ReplaceArgsModel = globals_[model_name]  # Not necessary - just for illustration
     assert my_func(1, "text") == (1, "text", "abc")
     assert my_func(ReplaceArgsModel(num=1, text="text")) == (1, "text", "abc")  # noqa
+
+    model_name = "DescribeMeModel"
+
+    class Person(BaseModel):
+        name: str
+        age: int
+
+        @replace_args(caller_globals=globals_, model_name=model_name)
+        def describe_me(self, verbose: bool = False):
+            if verbose:
+                return f"{self.name} is {self.age} years old."
+            else:
+                return self.name
+
+    assert model_name in globals_
+    assert Person(name="Alice", age=30).describe_me() == "Alice"
+    assert (
+        Person(name="Alice", age=30).describe_me(verbose=True)
+        == "Alice is 30 years old."
+    )
+    # print(Person(name="Alice", age=30).describe_me(DescribeMeModel(verbose=False)))
+    assert (
+        Person(name="Tom", age=20).describe_me(DescribeMeModel(verbose=False))  # noqa
+        == "Tom"
+    )
+    assert (
+        Person(name="Tom", age=20).describe_me(DescribeMeModel(verbose=True))  # noqa
+        == "Tom is 20 years old."
+    )
+
+    class Child(Person):
+        parent: Person
+
+        @classmethod
+        @replace_args(caller_globals=globals_)
+        def return_class_name(cls, verbose: bool = False):
+            if verbose:
+                return f"Class name: {cls.__name__}"
+            return cls.__name__
+
+    assert (
+        Child(
+            name="Anna", age=3, parent=Person(name="Alice", age=25)
+        ).return_class_name()
+        == "Child"
+    )
+    assert (
+        Child.return_class_name(ReturnClassNameParam(verbose=True))  # noqa
+        == "Class name: Child"
+    )
+
+    # Not implemented yet:
+    # with pytest.raises(ValueError):
+    #     # Mixing of different model versions is not allowed
+    #
+    #     class Package(pv1.BaseModel):
+    #         id: int
+    #
+    #         @replace_args(caller_globals=globals_)
+    #         def return_me(self, to: Person, verbose: bool = False):
+    #             if verbose:
+    #                 return f"Returning package {self.id} to {to.name}"
+    #             else:
+    #                 return f"{self.id} back to {to.name}"
