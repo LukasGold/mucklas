@@ -1,6 +1,12 @@
 import inspect
+import sys
 from dataclasses import dataclass
-from enum import StrEnum
+
+if sys.version_info >= (3, 11):
+    from enum import StrEnum
+else:
+    from backports.strenum import StrEnum
+
 from functools import partialmethod, wraps
 from typing import Any, Callable, Dict, Type, TypeVar, Union, get_args
 
