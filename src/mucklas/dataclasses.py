@@ -23,7 +23,7 @@ class FuncType(StrEnum):
     class_method = "class_method"
 
 
-def partialclass(cls, *args, **kwargs):  # noqa: typo
+def partialclass(*args, **kwargs) -> type:  # noqa: typo
     """Partial class to be used on a class to partially initialize it.
     E.g., to set default values for some attributes. Returns a partially initialized
     class, which can be used to create instances of the class, but without having to
@@ -35,10 +35,13 @@ def partialclass(cls, *args, **kwargs):  # noqa: typo
     python-equivalent-of-functools-partial-for-a-class-constructor
     """
 
-    class NewCls(cls):
-        __init__ = partialmethod(cls.__init__, *args, **kwargs)
+    def decorator(cls: type) -> type:
+        class NewCls(cls):
+            __init__ = partialmethod(cls.__init__, *args, **kwargs)
 
-    return NewCls
+        return NewCls
+
+    return decorator
 
 
 def pydantic_model(cls: Type[T]) -> Type[T]:
@@ -70,7 +73,7 @@ class WhatModelTypeResult:
     model: Union[Type[BaseModel], Type[pv1.BaseModel]] = None
 
 
-def what_model_type(
+def what_model_version(
     type_: Union[type, Type[T]], return_model: bool = False
 ) -> WhatModelTypeResult:
     """Determines if a type is a (subclass of a) Pydantic model and if so,
@@ -114,6 +117,27 @@ def what_model_type(
     if return_model:
         return WhatModelTypeResult(pydantic_model_version=result, model=model)
     return WhatModelTypeResult(pydantic_model_version=result)
+
+
+def attribute_defaults(mdl: Union[Type[pv1.BaseModel], Type[BaseModel]]):
+    """Function to extract the default values of the fields of a Pydantic model."""
+    model_version = what_model_version(mdl).pydantic_model_version
+    defaults = {}
+    if model_version == PydanticModelVersion.V1:
+        mdl: Type[pv1.BaseModel]
+        model_fields = mdl.__fields__
+    elif model_version == PydanticModelVersion.V2:
+        mdl: Type[BaseModel]
+        model_fields = mdl.model_fields
+    else:
+        raise ValueError("The model must be a Pydantic model.")
+    for name, field in model_fields.items():
+        defaults[name] = (
+            field.default
+            if field.default is not None
+            else (field.default_factory if field.default_factory is not None else None)
+        )
+    return defaults
 
 
 def function_or_method(func: Callable) -> FuncType:
@@ -164,7 +188,7 @@ def pydantic_model_version_used(func: Callable) -> PydanticModelVersion:
     signature = inspect.signature(func)
     # Get the argument types
     arg_types = {
-        name: what_model_type(param.annotation).pydantic_model_version
+        name: what_model_version(param.annotation).pydantic_model_version
         for name, param in signature.parameters.items()
     }
     # Get the unique types
@@ -369,7 +393,7 @@ def replace_param(func: Callable) -> Callable:
     # Extract the params argument type
     param_type = original_sig.parameters[param_name].annotation
     # Ensure params_type is a subclass of BaseModel
-    test_res = what_model_type(type_=param_type, return_model=True)
+    test_res = what_model_version(type_=param_type, return_model=True)
     model_version = test_res.pydantic_model_version
     if model_version == PydanticModelVersion.NONE:
         raise TypeError(

@@ -74,7 +74,7 @@ _overwrite_per_class: Dict[str, Dict[str, OSW.OverwriteClassParam]] = (
 '''
 
 # Replacing the default value for "parallel"
-ParallelDisabled = partialclass(OswExpress.StoreEntityParam, parallel=False, )
+ParallelDisabled = partialclass(parallel=False)(OswExpress.StoreEntityParam)
 
 osw_obj = OswExpress("wiki-dev.open-semantic-lab.org")
 
