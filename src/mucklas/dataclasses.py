@@ -7,6 +7,7 @@ if sys.version_info >= (3, 11):
 else:
     from backports.strenum import StrEnum
 
+import functools
 from functools import partialmethod, wraps
 from typing import Any, Callable, Dict, Type, TypeVar, Union, get_args
 
@@ -23,7 +24,7 @@ class FuncType(StrEnum):
     class_method = "class_method"
 
 
-def partialclass(*args, **kwargs) -> type:  # noqa: typo
+def partialclass(*args, **kwargs) -> Callable[[type], type]:  # noqa: typo
     """Partial class to be used on a class to partially initialize it.
     E.g., to set default values for some attributes. Returns a partially initialized
     class, which can be used to create instances of the class, but without having to
@@ -39,6 +40,7 @@ def partialclass(*args, **kwargs) -> type:  # noqa: typo
         class NewCls(cls):
             __init__ = partialmethod(cls.__init__, *args, **kwargs)
 
+        functools.update_wrapper(NewCls, cls, updated=())
         return NewCls
 
     return decorator
